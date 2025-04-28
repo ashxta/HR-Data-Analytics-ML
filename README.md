@@ -53,7 +53,6 @@ We built an end-to-end machine learning pipeline that predicts attrition risk, e
 
 ## 📈 Workflow Diagram
 
-```mermaid
 flowchart TD
     A[Data Collection] --> B[Data Preprocessing]
     B --> C[Model Building (Random Forest)]
