@@ -3,8 +3,7 @@
 ## 📚 Overview
 
 This project builds a complete HR analytics pipeline that not only predicts employee attrition but also generates deep, interpretable, and actionable business insights for HR decision-making.
-
--> We developed an end-to-end system that:
+ Developed an end-to-end system that:
 
 -> Predicts attrition risk using a trained ML model
 
