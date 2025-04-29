@@ -21,14 +21,20 @@ import joblib
 def load_data(path):
     df = pd.read_csv('cleaned_hr_data.csv')
     print(f"Dataset Shape: {df.shape}")
+    print("\nFirst 5 rows:")
+    print(df.head())
+    print("\nData types:")
+    print(df.dtypes)
     return df
 
 # 3. Preprocessing Function
 def preprocess_data(df):
     label_encoders = {}
     categorical_cols = df.select_dtypes(include=['object']).columns
-
+    
+    print("\nCategorical columns being encoded:")
     for col in categorical_cols:
+        print(f"- {col}")
         le = LabelEncoder()
         df[col] = le.fit_transform(df[col])
         label_encoders[col] = le
@@ -43,29 +49,45 @@ def split_data(X, y, test_size=0.2, random_state=42):
 
 # 5. Apply SMOTE
 def apply_smote(X_train, y_train):
+    print("\nClass distribution before SMOTE:")
+    print(pd.Series(y_train).value_counts())
+    
     smote = SMOTE(random_state=42)
     X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
-    print(f"After SMOTE: {X_resampled.shape}")
+    
+    print("\nClass distribution after SMOTE:")
+    print(pd.Series(y_resampled).value_counts())
+    
+    print(f"\nAfter SMOTE: {X_resampled.shape}")
     return X_resampled, y_resampled
 
 # 6. Model Building
 def build_model(X_train, y_train):
-    rf = RandomForestClassifier(random_state=42)
+    print("\nBuilding Random Forest model...")
+    rf = RandomForestClassifier(
+        n_estimators=100,
+        max_depth=10,
+        min_samples_split=5,
+        random_state=42
+    )
     rf.fit(X_train, y_train)
     return rf
 
 # 7. Evaluate Model
 def evaluate_model(model, X_test, y_test):
     y_pred = model.predict(X_test)
+    print("\nModel Evaluation:")
     print("\nAccuracy Score:", accuracy_score(y_test, y_pred))
     print("\nClassification Report:\n", classification_report(y_test, y_pred))
 
     cm = confusion_matrix(y_test, y_pred)
     plt.figure(figsize=(6, 4))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
-    plt.title('Confusion Matrix')
-    plt.xlabel('Predicted')
-    plt.ylabel('Actual')
+    plt.title('Confusion Matrix - Attrition Prediction')
+    plt.xlabel('Predicted Attrition Status')
+    plt.ylabel('Actual Attrition Status')
+    plt.xticks([0.5, 1.5], ['No', 'Yes'])
+    plt.yticks([0.5, 1.5], ['No', 'Yes'])
     plt.show()
 
 # 8. Feature Importance
@@ -76,107 +98,248 @@ def plot_feature_importance(model, feature_names):
 
     plt.figure(figsize=(10, 6))
     sns.barplot(x='Importance', y='Feature', data=feat_df.head(15))
-    plt.title('Top 15 Feature Importances')
+    plt.title('Top 15 Features Influencing Attrition')
+    plt.xlabel('Relative Importance (0-1)')
+    plt.ylabel('Feature Name')
     plt.tight_layout()
     plt.show()
 
 # 9. Risk Analysis by Department
-department_mapping = dict(zip(le.transform(le.classes_), le.classes_))
-attrition_by_dept.index = attrition_by_dept.index.map(department_mapping)
-
-# Now plot again
-plt.figure(figsize=(6,4))
-attrition_by_dept.plot(kind='bar', color='salmon', legend=False)
-plt.title('Attrition Risk by Department')
-plt.xlabel('Department')
-plt.ylabel('Attrition Rate')
-plt.xticks(rotation=45)
-plt.tight_layout()
-plt.show()
+def department_risk_analysis(df, label_encoders):
+    # Reverse encode Department for interpretability
+    if 'Department' in label_encoders:
+        df['Department'] = label_encoders['Department'].inverse_transform(df['Department'])
+    
+    dept_attrition = df.groupby('Department')['Attrition'].mean().sort_values(ascending=False)
+    print("\nAttrition Risk by Department:\n", dept_attrition)
+    
+    plt.figure(figsize=(8, 5))
+    dept_attrition.plot(kind='bar', color='salmon')
+    plt.title('Attrition Risk by Department')
+    plt.xlabel('Department')
+    plt.ylabel('Attrition Rate (0-1)')
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.show()
 
 # 10. Clustering Employees into Risk Groups
-def employee_clustering(X):
+def employee_clustering(X, df):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
+    # Use elbow method to determine optimal clusters
+    wcss = []
+    for i in range(1, 11):
+        kmeans = KMeans(n_clusters=i, random_state=42)
+        kmeans.fit(X_scaled)
+        wcss.append(kmeans.inertia_)
+    
+    plt.figure(figsize=(8, 5))
+    plt.plot(range(1, 11), wcss, marker='o', linestyle='--')
+    plt.title('Elbow Method for Optimal Cluster Number')
+    plt.xlabel('Number of Clusters')
+    plt.ylabel('Within-Cluster Sum of Squares (WCSS)')
+    plt.grid()
+    plt.show()
+
+    # Perform clustering with optimal clusters (3 in this case)
     kmeans = KMeans(n_clusters=3, random_state=42)
     clusters = kmeans.fit_predict(X_scaled)
-
-    plt.figure(figsize=(8,6))
-    sns.scatterplot(x=X_scaled[:,0], y=X_scaled[:,1], hue=clusters, palette='viridis')
+    
+    # Add cluster info to original dataframe
+    df['RiskCluster'] = clusters
+    
+    # Plot clusters using two most important features
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(
+        x=X_scaled[:, 0], 
+        y=X_scaled[:, 1], 
+        hue=clusters, 
+        palette='viridis',
+        alpha=0.7
+    )
     plt.title('Employee Risk Clustering')
+    plt.xlabel('Standardized Feature 1 (First Principal Component)')
+    plt.ylabel('Standardized Feature 2 (Second Principal Component)')
+    plt.grid(alpha=0.3)
     plt.show()
 
     return clusters
 
 # 11. Salary Impact Simulation
-def salary_simulation(df, model, increase_percent=10):
+def salary_simulation(df, model, label_encoders, increments=[10, 20, 30, 40, 50]):
     df_sim = df.copy()
-    original_predictions = model.predict(df_sim.drop('Attrition', axis=1))
+    
+    # Decode Attrition if needed (not used for predictions though)
+    if 'Attrition' in label_encoders:
+        original_attrition = label_encoders['Attrition'].inverse_transform(df_sim['Attrition'])
 
-    # Simulate salary increase
-    if 'MonthlyIncome' in df_sim.columns:
-        df_sim['MonthlyIncome'] *= (1 + increase_percent/100)
+    X_base = df_sim.drop('Attrition', axis=1)
+    original_predictions = model.predict_proba(X_base)[:, 1]
+    base_rate = np.mean(original_predictions) * 100
 
-    new_predictions = model.predict(df_sim.drop('Attrition', axis=1))
+    avg_attrition_rates = [base_rate]  # Start with current attrition rate
+    labels = ["Current"]
 
-    improvement = np.mean(original_predictions) - np.mean(new_predictions)
-    print(f"\nAttrition reduction if salary increased by {increase_percent}%: {improvement*100:.2f}%")
+    for inc in increments:
+        df_mod = df_sim.copy()
+        if 'MonthlyIncome' in df_mod.columns:
+            df_mod['MonthlyIncome'] *= (1 + inc / 100)
+        
+        X_mod = df_mod.drop('Attrition', axis=1)
+        predictions = model.predict_proba(X_mod)[:, 1]
+        avg_attrition = np.mean(predictions) * 100
+        avg_attrition_rates.append(avg_attrition)
+        labels.append(f"+{inc}%")
+
+        print(f"→ Attrition if salary increased by {inc}%: {avg_attrition:.2f}%")
+
+    # Plotting
+    plt.figure(figsize=(10, 6))
+    bars = plt.bar(labels, avg_attrition_rates, color=['red'] + ['green'] * len(increments))
+    plt.title("Impact of Salary Increase on Predicted Attrition")
+    plt.xlabel("Salary Increase (%)")
+    plt.ylabel("Avg Predicted Attrition Rate (%)")
+    plt.ylim(0, max(avg_attrition_rates) + 5)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    for bar in bars:
+        yval = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.5, f"{yval:.2f}%", ha='center', va='bottom')
+
+    plt.tight_layout()
+    plt.show()
+
 
 # 12. Manager-wise Attrition Risk
-def manager_risk_analysis(df):
-    if 'ManagerID' in df.columns:
-        manager_risk = df.groupby('ManagerID')['Attrition'].mean().sort_values(ascending=False)
-        print("\nAttrition Risk by Manager:\n", manager_risk)
-        manager_risk.plot(kind='bar', color='lightgreen')
-        plt.title('Attrition Risk by Manager')
+def manager_risk_analysis(df, label_encoders):
+    if 'YearsWithCurrManager' in df.columns:
+        # Create manager tenure groups
+        df['ManagerTenureGroup'] = pd.cut(
+            df['YearsWithCurrManager'],
+            bins=[0, 2, 5, 10, 50],
+            labels=['0-2 years', '2-5 years', '5-10 years', '10+ years']
+        )
+        
+        # Calculate attrition by manager tenure
+        tenure_attrition = df.groupby('ManagerTenureGroup', observed = 'True')['Attrition'].mean()
+        
+        plt.figure(figsize=(8, 5))
+        tenure_attrition.plot(kind='bar', color='lightgreen')
+        plt.title('Attrition Risk by Manager Tenure')
+        plt.xlabel('Years with Current Manager')
         plt.ylabel('Attrition Rate')
+        plt.xticks(rotation=45)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
         plt.show()
 
-# 13. Save Model
-def save_model(model, label_encoders, filename='hr_attrition_model_full.pkl'):
-    joblib.dump({'model': model, 'encoders': label_encoders}, filename)
-    print(f"Model saved to {filename}")
+# 13. Work-Life Balance Analysis
+def work_life_analysis(df, label_encoders):
+    if 'WorkLifeBalance' in df.columns:
+        # Reverse encode Attrition for interpretability
+        if 'Attrition' in label_encoders:
+            df['Attrition'] = label_encoders['Attrition'].inverse_transform(df['Attrition'])
+        
+        plt.figure(figsize=(10, 6))
+        sns.countplot(
+            x='WorkLifeBalance',
+            hue='Attrition',
+            data=df,
+            palette='coolwarm'
+        )
+        plt.title('Attrition by Work-Life Balance Rating')
+        plt.xlabel('Work-Life Balance Rating (1-4)')
+        plt.ylabel('Number of Employees')
+        plt.legend(title='Attrition Status')
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.show()
 
-# 14. Main Pipeline
+# 14. Save Model
+def save_model(model, label_encoders, filename='hr_attrition_model_enhanced.pkl'):
+    joblib.dump({'model': model, 'encoders': label_encoders}, filename)
+    print(f"\nModel and encoders saved to {filename}")
+
+# 15. Main Pipeline
 def main():
     # Step 1: Load
+    print("="*50)
+    print("STEP 1: LOADING DATA")
+    print("="*50)
     df = load_data('cleaned_hr_data.csv')
-
+    
     # Step 2: Preprocess
+    print("\n" + "="*50)
+    print("STEP 2: DATA PREPROCESSING")
+    print("="*50)
     X, y, label_encoders = preprocess_data(df)
-
+    
     # Step 3: Train/Test Split
+    print("\n" + "="*50)
+    print("STEP 3: TRAIN/TEST SPLIT")
+    print("="*50)
     X_train, X_test, y_train, y_test = split_data(X, y)
-
+    
     # Step 4: SMOTE
+    print("\n" + "="*50)
+    print("STEP 4: APPLYING SMOTE")
+    print("="*50)
     X_train_resampled, y_train_resampled = apply_smote(X_train, y_train)
-
+    
     # Step 5: Build Model
+    print("\n" + "="*50)
+    print("STEP 5: MODEL TRAINING")
+    print("="*50)
     model = build_model(X_train_resampled, y_train_resampled)
-
+    
     # Step 6: Evaluate
+    print("\n" + "="*50)
+    print("STEP 6: MODEL EVALUATION")
+    print("="*50)
     evaluate_model(model, X_test, y_test)
-
+    
     # Step 7: Feature Importance
+    print("\n" + "="*50)
+    print("STEP 7: FEATURE IMPORTANCE")
+    print("="*50)
     plot_feature_importance(model, X.columns)
-
+    
     # Step 8: Department Risk
-    department_risk_analysis(df)
-
+    print("\n" + "="*50)
+    print("STEP 8: DEPARTMENT RISK ANALYSIS")
+    print("="*50)
+    department_risk_analysis(df.copy(), label_encoders)
+    
     # Step 9: Employee Clustering
-    clusters = employee_clustering(X)
-
+    print("\n" + "="*50)
+    print("STEP 9: EMPLOYEE RISK CLUSTERING")
+    print("="*50)
+    clusters = employee_clustering(X, df.copy())
+    
     # Step 10: Salary Simulation
-    salary_simulation(df, model, increase_percent=10)
+    print("\n" + "="*50)
+    print("STEP 10: SALARY IMPACT SIMULATION")
+    print("="*50)
+    salary_simulation(df.copy(), model, label_encoders, increments=[10, 20, 30, 40, 50])
 
-    # Step 11: Manager-wise Analysis (optional if ManagerID exists)
-    if 'ManagerID' in df.columns:
-        manager_risk_analysis(df)
-
-    # Step 12: Save model
+    
+    # Step 11: Manager-wise Analysis
+    print("\n" + "="*50)
+    print("STEP 11: MANAGER TENURE ANALYSIS")
+    print("="*50)
+    manager_risk_analysis(df.copy(), label_encoders)
+    
+    # Step 12: Work-Life Balance Analysis
+    print("\n" + "="*50)
+    print("STEP 12: WORK-LIFE BALANCE ANALYSIS")
+    print("="*50)
+    work_life_analysis(df.copy(), label_encoders)
+    
+    # Step 13: Save model
+    print("\n" + "="*50)
+    print("STEP 13: SAVING MODEL")
+    print("="*50)
     save_model(model, label_encoders)
 
-# 15. Execute
+# 16. Execute
 if __name__ == "__main__":
     main()
