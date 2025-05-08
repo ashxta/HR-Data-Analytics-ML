@@ -1,6 +1,6 @@
-# ==========================================
-# HR Attrition Full Analysis Pipeline
-# ==========================================
+# =====================
+# HR Attrition Analysis
+# =====================
 
 # 1. Import Required Libraries
 import pandas as pd
@@ -127,7 +127,7 @@ def employee_clustering(X, df):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Use elbow method to determine optimal clusters
+    # Use elbow method 
     wcss = []
     for i in range(1, 11):
         kmeans = KMeans(n_clusters=i, random_state=42)
@@ -142,14 +142,14 @@ def employee_clustering(X, df):
     plt.grid()
     plt.show()
 
-    # Perform clustering with optimal clusters (3 in this case)
+    # Perform clustering 
     kmeans = KMeans(n_clusters=3, random_state=42)
     clusters = kmeans.fit_predict(X_scaled)
     
     # Add cluster info to original dataframe
     df['RiskCluster'] = clusters
     
-    # Plot clusters using two most important features
+    # Plot clusters 
     plt.figure(figsize=(10, 6))
     sns.scatterplot(
         x=X_scaled[:, 0], 
@@ -170,7 +170,7 @@ def employee_clustering(X, df):
 def salary_simulation(df, model, label_encoders, increments=[10, 20, 30, 40, 50]):
     df_sim = df.copy()
     
-    # Decode Attrition if needed (not used for predictions though)
+    # Decode Attrition 
     if 'Attrition' in label_encoders:
         original_attrition = label_encoders['Attrition'].inverse_transform(df_sim['Attrition'])
 
@@ -178,7 +178,7 @@ def salary_simulation(df, model, label_encoders, increments=[10, 20, 30, 40, 50]
     original_predictions = model.predict_proba(X_base)[:, 1]
     base_rate = np.mean(original_predictions) * 100
 
-    avg_attrition_rates = [base_rate]  # Start with current attrition rate
+    avg_attrition_rates = [base_rate]  
     labels = ["Current"]
 
     for inc in increments:
